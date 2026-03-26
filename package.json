@@ -1,0 +1,15 @@
+{
+  "name": "pknu-lunch-slack-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PKNU cafeteria menu bot for Slack",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "post-menu": "node src/index.js",
+    "dry-run": "node src/index.js --dry-run",
+    "test": "node --test"
+  }
+}

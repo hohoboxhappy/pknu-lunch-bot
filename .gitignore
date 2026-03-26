@@ -1,0 +1,4 @@
+# 로컬 환경 파일과 실행 중 생성될 수 있는 임시 산출물을 Git에서 제외합니다.
+.env
+.DS_Store
+node_modules

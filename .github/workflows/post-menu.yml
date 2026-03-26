@@ -1,0 +1,37 @@
+# PKNU 식단을 평일 오전 11시에 슬랙으로 게시하는 GitHub Actions 워크플로
+name: Post PKNU Lunch Menu
+
+on:
+  schedule:
+    - cron: '0 2 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  post-menu:
+    runs-on: ubuntu-latest
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      PKNU_MENU_URL: https://www.pknu.ac.kr/main/399
+      TZ: Asia/Seoul
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install
+          else
+            echo "No package manifest found; skipping install."
+          fi
+
+      - name: Post today's menu to Slack
+        run: node src/index.js
