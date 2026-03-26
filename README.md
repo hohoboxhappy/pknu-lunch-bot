@@ -1,1 +1,0 @@
-# pknu-lunch-bot
