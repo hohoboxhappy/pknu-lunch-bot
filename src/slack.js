@@ -1,11 +1,7 @@
-// 파싱한 식단 정보를 슬랙 메시지 포맷으로 만들고 Incoming Webhook으로 전송하는 모듈입니다.
+// 부경대 교내식당과 행복기숙사 식단을 슬랙 메시지로 조합해 전송하는 모듈입니다.
 
-export function buildSlackPayload(menuResult, homepageUrl = 'https://www.pknu.ac.kr/main/399') {
-  const dateText = `${menuResult.date.isoDate}(${menuResult.date.weekdayKorean})`;
-  const cafeterias = ['lilac', 'hanmir']
-    .map((key) => menuResult.cafeterias[key])
-    .filter(Boolean);
-
+export function buildDailySlackPayload(dailyMenu) {
+  const dateText = `${dailyMenu.date.isoDate}(${dailyMenu.date.weekdayKorean})`;
   const blocks = [
     {
       type: 'header',
@@ -16,76 +12,28 @@ export function buildSlackPayload(menuResult, homepageUrl = 'https://www.pknu.ac
     },
   ];
 
-  for (const cafeteria of cafeterias) {
-    const heading = [cafeteria.cafeteriaName, cafeteria.mealLabel, cafeteria.priceLabel]
-      .filter(Boolean)
-      .join(' · ');
-    const menuText = cafeteria.menuLines.map((line) => `• ${line}`).join('\n');
-
+  if (dailyMenu.pknu) {
     blocks.push({
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*${heading}*\n${menuText}`,
+        text: buildPknuSectionText(dailyMenu.pknu),
       },
     });
   }
 
+  if (dailyMenu.happyDorm) {
+    blocks.push(...buildHappyDormBlocks(dailyMenu.happyDorm));
+  }
+
   blocks.push({
     type: 'context',
-    elements: [
-      {
-        type: 'mrkdwn',
-        text: `<${menuResult.sourceUrl}|원문 보기> · ${menuResult.title}`,
-      },
-      {
-        type: 'mrkdwn',
-        text: `<${homepageUrl}|홈페이지 보기>`,
-      },
-    ],
+    elements: buildContextElements(dailyMenu),
   });
 
   return {
-    text: [
-      `[부경대 식단] ${dateText}`,
-      ...cafeterias.map((cafeteria) => `${cafeteria.cafeteriaName}: ${cafeteria.menuLines.join(', ')}`),
-      `원문: ${menuResult.sourceUrl}`,
-      `홈페이지: ${homepageUrl}`,
-    ].join('\n'),
+    text: buildFallbackText(dailyMenu, dateText),
     blocks,
-  };
-}
-
-export function buildMissingMenuSlackPayload(date, homepageUrl = 'https://www.pknu.ac.kr/main/399') {
-  const dateText = `${date.isoDate}(${date.weekdayKorean})`;
-
-  return {
-    text: `[부경대 식단] ${dateText}\n오늘 식단이 없습니다. 홈페이지를 확인해 보세요.\n홈페이지: ${homepageUrl}`,
-    blocks: [
-      {
-        type: 'header',
-        text: {
-          type: 'plain_text',
-          text: `부경대 식단 알림 · ${dateText}`,
-        },
-      },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '*식단 안내*\n오늘 식단이 없습니다. 홈페이지를 확인해 보세요.',
-        },
-      },
-      {
-        type: 'context',
-        elements: [
-          {
-            type: 'mrkdwn',
-            text: `<${homepageUrl}|홈페이지 보기>`,
-          },
-        ],
-      },
-    ],
   };
 }
 
@@ -113,4 +61,141 @@ export async function postToSlack(webhookUrl, payload, fetchImpl = globalThis.fe
   }
 
   return bodyText;
+}
+
+function buildPknuSectionText(pknu) {
+  if (pknu.status === 'holiday') {
+    return `*부경대 교내식당*\n휴일/휴무로 운영하지 않습니다.`;
+  }
+
+  if (pknu.status === 'missing') {
+    return `*부경대 교내식당*\n오늘 식단이 없습니다. 홈페이지를 확인해 보세요.`;
+  }
+
+  const cafeterias = ['lilac', 'hanmir']
+    .map((key) => pknu.cafeterias[key])
+    .filter(Boolean)
+    .map((cafeteria) => {
+      const heading = [cafeteria.cafeteriaName, cafeteria.mealLabel, cafeteria.priceLabel]
+        .filter(Boolean)
+        .join(' · ');
+
+      return `*${heading}*\n${cafeteria.menuLines.map((line) => `• ${line}`).join('\n')}`;
+    });
+
+  return ['*부경대 교내식당*', ...cafeterias].join('\n\n');
+}
+
+function buildHappyDormBlocks(happyDorm) {
+  if (happyDorm.status === 'holiday') {
+    return [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '*행복기숙사 식당*\n휴일/휴무로 운영하지 않습니다.',
+        },
+      },
+    ];
+  }
+
+  if (happyDorm.status === 'missing') {
+    return [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '*행복기숙사 식당*\n오늘 식단이 없습니다. 홈페이지를 확인해 보세요.',
+        },
+      },
+    ];
+  }
+
+  const mealOrder = ['조식', '중식', '석식'];
+
+  return mealOrder
+    .filter((meal) => happyDorm.meals[meal]?.length)
+    .map((meal) => ({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*행복기숙사 ${meal}*\n${happyDorm.meals[meal]
+          .filter((section) => section.lines.length > 0)
+          .map((section) => `• ${section.label}: ${section.lines.join(' / ')}`)
+          .join('\n')}`,
+      },
+    }));
+}
+
+function buildContextElements(dailyMenu) {
+  const elements = [];
+
+  if (dailyMenu.pknu) {
+    if (dailyMenu.pknu.sourceUrl) {
+      elements.push({
+        type: 'mrkdwn',
+        text: `<${dailyMenu.pknu.sourceUrl}|PKNU 원문 보기>`,
+      });
+    }
+
+    elements.push({
+      type: 'mrkdwn',
+      text: `<${dailyMenu.pknu.homepageUrl}|PKNU 홈페이지>`,
+    });
+  }
+
+  if (dailyMenu.happyDorm) {
+    elements.push({
+      type: 'mrkdwn',
+      text: `<${dailyMenu.happyDorm.homepageUrl}|행복기숙사 식단표>`,
+    });
+  }
+
+  return elements;
+}
+
+function buildFallbackText(dailyMenu, dateText) {
+  const lines = [`[부경대 식단] ${dateText}`];
+
+  if (dailyMenu.pknu) {
+    if (dailyMenu.pknu.status === 'available') {
+      for (const cafeteria of ['lilac', 'hanmir'].map((key) => dailyMenu.pknu.cafeterias[key]).filter(Boolean)) {
+        lines.push(`${cafeteria.cafeteriaName}: ${cafeteria.menuLines.join(', ')}`);
+      }
+      if (dailyMenu.pknu.sourceUrl) {
+        lines.push(`PKNU 원문: ${dailyMenu.pknu.sourceUrl}`);
+      }
+    } else if (dailyMenu.pknu.status === 'holiday') {
+      lines.push('부경대 교내식당: 휴일/휴무');
+    } else {
+      lines.push('부경대 교내식당: 오늘 식단이 없습니다. 홈페이지를 확인해 보세요.');
+    }
+  }
+
+  if (dailyMenu.happyDorm) {
+    if (dailyMenu.happyDorm.status === 'available') {
+      for (const [meal, sections] of Object.entries(dailyMenu.happyDorm.meals)) {
+        const summary = sections
+          .filter((section) => section.lines.length > 0)
+          .map((section) => `${section.label}: ${section.lines.join(' / ')}`)
+          .join(' | ');
+
+        lines.push(`행복기숙사 ${meal}: ${summary}`);
+      }
+    } else if (dailyMenu.happyDorm.status === 'holiday') {
+      lines.push('행복기숙사 식당: 휴일/휴무');
+    } else {
+      lines.push('행복기숙사 식당: 오늘 식단이 없습니다. 홈페이지를 확인해 보세요.');
+    }
+  }
+
+  if (dailyMenu.pknu) {
+    lines.push(`PKNU 홈페이지: ${dailyMenu.pknu.homepageUrl}`);
+  }
+
+  if (dailyMenu.happyDorm) {
+    lines.push(`행복기숙사 식단표: ${dailyMenu.happyDorm.homepageUrl}`);
+  }
+
+  return lines.join('\n');
 }

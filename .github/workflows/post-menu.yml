@@ -1,9 +1,9 @@
-# PKNU 식단을 평일 오전 11시에 슬랙으로 게시하는 GitHub Actions 워크플로
+# PKNU와 행복기숙사 식단을 평일 오전 8시에 슬랙으로 게시하는 GitHub Actions 워크플로
 name: Post PKNU Lunch Menu
 
 on:
   schedule:
-    - cron: '0 2 * * 1-5'
+    - cron: '0 23 * * 0-4'
   workflow_dispatch:
 
 jobs:

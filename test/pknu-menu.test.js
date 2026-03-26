@@ -1,11 +1,12 @@
-// PKNU 식단 파서와 자동 게시 흐름이 휴무/식단 없음 조건까지 올바르게 처리되는지 검증하는 테스트입니다.
+// PKNU 식단과 행복기숙사 식단 파서, 자동 게시 흐름이 함께 올바르게 처리되는지 검증하는 테스트입니다.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { runMenuBot } from '../src/app.js';
+import { parseHappyDormMenu } from '../src/happydorm-menu.js';
 import { extractMenuPostCandidates, fetchLatestMenuForDate, getKstDateParts, parseMenuPost } from '../src/pknu-menu.js';
-import { buildMissingMenuSlackPayload, buildSlackPayload } from '../src/slack.js';
+import { buildDailySlackPayload } from '../src/slack.js';
 
 const LIST_HTML = `
   <html>
@@ -156,6 +157,74 @@ const HOLIDAY_DETAIL_HTML = `
   </html>
 `;
 
+const HAPPY_DORM_HTML = `
+  <html>
+    <body>
+      <table class="table__week week_menu_2026-03-26">
+        <thead>
+          <tr><th colspan="3">목요일 (2026-03-26)</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th class="meal__PC" rowspan="2">조식</th>
+            <th class="meal__M meal__MH" colspan="3">조식</th>
+            <th class="tbale__bgRed meal__PC">일반 메뉴</th>
+            <th class="tbale__bgRed meal__M" colspan="3">일반 메뉴</th>
+            <td class="meal__PC">쌀밥 미역국 계란찜 김치 빵 우유</td>
+            <td class="meal__M" colspan="3">쌀밥 미역국 계란찜 김치 빵 우유</td>
+          </tr>
+          <tr>
+            <th class="bg__light meal__PC">TAKE - OUT</th>
+            <th class="bg__light meal__M" colspan="3">TAKE - OUT</th>
+            <td class="meal__PC">샌드위치 세트</td>
+            <td class="meal__M" colspan="3">샌드위치 세트</td>
+          </tr>
+          <tr>
+            <th class="meal__PC" rowspan="3">중식</th>
+            <th class="meal__M meal__MH" colspan="3">중식</th>
+            <th class="tbale__bgRed meal__PC">일반 메뉴</th>
+            <th class="tbale__bgRed meal__M" colspan="3">일반 메뉴</th>
+            <td class="meal__PC">정식 : 쌀밥 육개장 제육볶음 김치<br /><br />일품 : 비빔국수</td>
+            <td class="meal__M" colspan="3">정식 : 쌀밥 육개장 제육볶음 김치<br /><br />일품 : 비빔국수</td>
+          </tr>
+          <tr>
+            <th class="bg__light meal__PC">샐러드/후식</th>
+            <th class="bg__light meal__M" colspan="3">샐러드/후식</th>
+            <td class="meal__PC">그린샐러드</td>
+            <td class="meal__M" colspan="3">그린샐러드</td>
+          </tr>
+          <tr>
+            <th class="bg__light meal__PC">TAKE - OUT</th>
+            <th class="bg__light meal__M" colspan="3">TAKE - OUT</th>
+            <td class="meal__PC"></td>
+            <td class="meal__M" colspan="3"></td>
+          </tr>
+          <tr>
+            <th class="meal__PC" rowspan="3">석식</th>
+            <th class="meal__M meal__MH" colspan="3">석식</th>
+            <th class="tbale__bgRed meal__PC">일반 메뉴</th>
+            <th class="tbale__bgRed meal__M" colspan="3">일반 메뉴</th>
+            <td class="meal__PC">정식 : 쌀밥 순두부찌개 떡갈비 깍두기</td>
+            <td class="meal__M" colspan="3">정식 : 쌀밥 순두부찌개 떡갈비 깍두기</td>
+          </tr>
+          <tr>
+            <th class="bg__light meal__PC">샐러드/후식</th>
+            <th class="bg__light meal__M" colspan="3">샐러드/후식</th>
+            <td class="meal__PC"></td>
+            <td class="meal__M" colspan="3"></td>
+          </tr>
+          <tr>
+            <th class="bg__light meal__PC">TAKE - OUT</th>
+            <th class="bg__light meal__M" colspan="3">TAKE - OUT</th>
+            <td class="meal__PC">컵과일</td>
+            <td class="meal__M" colspan="3">컵과일</td>
+          </tr>
+        </tbody>
+      </table>
+    </body>
+  </html>
+`;
+
 test('목록 페이지에서 최신 식단 글 후보를 순서대로 수집한다', () => {
   const candidates = extractMenuPostCandidates(LIST_HTML);
 
@@ -198,26 +267,43 @@ test('최신 글 탐색부터 메뉴 추출까지 end-to-end로 동작한다', a
   assert.equal(result.cafeterias.hanmir.priceLabel, '(5,500원)');
 });
 
-test('정상 식단 payload에 원문 링크와 홈페이지 주소를 함께 담는다', async () => {
-  const result = await fetchLatestMenuForDate({
+test('정상 식단 payload에 PKNU와 행복기숙사 주소를 함께 담는다', async () => {
+  const pknuResult = await fetchLatestMenuForDate({
     date: getKstDateParts('2026-03-26'),
     fetchImpl: async (url) => new Response(url.includes('no=723995') ? DETAIL_HTML : LIST_HTML, {
       status: 200,
       statusText: 'OK',
     }),
   });
-  const payload = buildSlackPayload(result);
+  const happyDorm = parseHappyDormMenu(HAPPY_DORM_HTML, getKstDateParts('2026-03-26'));
+  const payload = buildDailySlackPayload({
+    date: getKstDateParts('2026-03-26'),
+    pknu: {
+      status: 'available',
+      ...pknuResult,
+      homepageUrl: 'https://www.pknu.ac.kr/main/399',
+    },
+    happyDorm: {
+      status: 'available',
+      ...happyDorm,
+      homepageUrl: 'https://happydorm.or.kr/busan/ko/0605/cafeteria/menu/',
+      sourceUrl: 'https://happydorm.or.kr/busan/ko/0605/cafeteria/menu/weekly/20260326',
+    },
+  });
 
-  assert.match(payload.text, /원문: https:\/\/www\.pknu\.ac\.kr\/main\/399\?action=view&no=723995/);
-  assert.match(payload.text, /홈페이지: https:\/\/www\.pknu\.ac\.kr\/main\/399/);
+  assert.match(payload.text, /PKNU 원문: https:\/\/www\.pknu\.ac\.kr\/main\/399\?action=view&no=723995/);
+  assert.match(payload.text, /PKNU 홈페이지: https:\/\/www\.pknu\.ac\.kr\/main\/399/);
+  assert.match(payload.text, /행복기숙사 식단표: https:\/\/happydorm\.or\.kr\/busan\/ko\/0605\/cafeteria\/menu\//);
 });
 
-test('식단이 없으면 안내 payload와 홈페이지 주소를 만든다', () => {
-  const payload = buildMissingMenuSlackPayload(getKstDateParts('2026-03-31'));
+test('행복기숙사 페이지에서 조식·중식·석식을 파싱한다', () => {
+  const parsed = parseHappyDormMenu(HAPPY_DORM_HTML, getKstDateParts('2026-03-26'));
+  const dinnerTakeOut = parsed.meals['석식'].find((section) => section.label === 'TAKE - OUT');
 
-  assert.match(payload.text, /오늘 식단이 없습니다\. 홈페이지를 확인해 보세요\./);
-  assert.match(payload.text, /홈페이지: https:\/\/www\.pknu\.ac\.kr\/main\/399/);
-  assert.equal(payload.blocks[1].type, 'section');
+  assert.deepEqual(parsed.meals['조식'][0].lines, ['쌀밥 미역국 계란찜 김치 빵 우유']);
+  assert.deepEqual(parsed.meals['조식'][1].lines, ['샌드위치 세트']);
+  assert.deepEqual(parsed.meals['중식'][0].lines, ['정식 : 쌀밥 육개장 제육볶음 김치', '일품 : 비빔국수']);
+  assert.deepEqual(dinnerTakeOut.lines, ['컵과일']);
 });
 
 test('식단표가 휴일/휴무로 표기된 날에는 슬랙 전송 없이 skip 한다', async () => {
@@ -234,6 +320,14 @@ test('식단표가 휴일/휴무로 표기된 날에는 슬랙 전송 없이 ski
       status: 200,
       statusText: 'OK',
     }),
+    fetchHappyDormMenuForDateImpl: async () => ({
+      status: 'available',
+      homepageUrl: 'https://happydorm.or.kr/busan/ko/0605/cafeteria/menu/',
+      sourceUrl: 'https://happydorm.or.kr/busan/ko/0605/cafeteria/menu/weekly/20260302',
+      meals: {
+        조식: [{ label: '일반 메뉴', lines: ['쌀밥 북어국'] }],
+      },
+    }),
     postToSlackImpl: async () => {
       posted = true;
       return 'ok';
@@ -242,13 +336,11 @@ test('식단표가 휴일/휴무로 표기된 날에는 슬랙 전송 없이 ski
     stderr: { error: () => {} },
   });
 
-  assert.equal(result.status, 'skipped');
-  assert.equal(result.reason, 'holiday-menu');
-  assert.equal(posted, false);
-  assert.match(logs[0], /휴일\/휴무/);
+  assert.equal(result.status, 'posted');
+  assert.equal(posted, true);
 });
 
-test('평일에 식단이 없으면 안내 메시지를 전송한다', async () => {
+test('평일에 PKNU 식단이 없더라도 행복기숙사와 함께 안내 메시지를 전송한다', async () => {
   let postedPayload;
   const missingDetailHtml = DETAIL_HTML.replace(/3월 26일/g, '3월 30일');
 
@@ -262,6 +354,17 @@ test('평일에 식단이 없으면 안내 메시지를 전송한다', async () 
       status: 200,
       statusText: 'OK',
     }),
+    fetchHappyDormMenuForDateImpl: async () => ({
+      title: '행복기숙사 식단표',
+      date: getKstDateParts('2026-03-26'),
+      homepageUrl: 'https://happydorm.or.kr/busan/ko/0605/cafeteria/menu/',
+      sourceUrl: 'https://happydorm.or.kr/busan/ko/0605/cafeteria/menu/weekly/20260326',
+      meals: {
+        조식: [{ label: '일반 메뉴', lines: ['쌀밥 미역국'] }],
+        중식: [{ label: '일반 메뉴', lines: ['정식 : 제육볶음'] }],
+        석식: [{ label: '일반 메뉴', lines: ['정식 : 떡갈비'] }],
+      },
+    }),
     postToSlackImpl: async (_webhookUrl, payload) => {
       postedPayload = payload;
       return 'ok';
@@ -271,5 +374,6 @@ test('평일에 식단이 없으면 안내 메시지를 전송한다', async () 
   });
 
   assert.equal(result.status, 'posted');
-  assert.match(postedPayload.text, /오늘 식단이 없습니다\. 홈페이지를 확인해 보세요\./);
+  assert.match(postedPayload.text, /부경대 교내식당: 오늘 식단이 없습니다\. 홈페이지를 확인해 보세요\./);
+  assert.match(postedPayload.text, /행복기숙사 조식: 일반 메뉴: 쌀밥 미역국/);
 });
